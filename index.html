@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- pmtiles-publisher-viewer:2 -->
 <html lang="ja">
 <head>
 <meta charset="utf-8">
@@ -34,6 +35,8 @@
   .item label { flex: 1; min-width: 0; cursor: pointer; }
   .item .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item .meta { display: block; font-size: 11px; color: var(--muted); }
+  .chips { display: flex; gap: 2px; margin-top: 3px; flex-wrap: wrap; }
+  .chips i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(0,0,0,.15); }
   .item button { font: inherit; font-size: 12px; padding: 1px 8px; cursor: pointer;
                  color: var(--accent); background: none; border: 1px solid var(--line);
                  border-radius: 6px; }
@@ -104,24 +107,65 @@ function setBasemap(key) {
   map.addLayer({ id: "basemap", type: "raster", source: "basemap" }, first);
 }
 
+// QGIS のシンボル (catalog.json の style) を MapLibre の式にする
+function valExpr(st, key, fallback) {
+  if (!st) return fallback;
+  const dflt = (st.default && st.default[key] !== undefined) ? st.default[key] : fallback;
+  if (st.mode === "categorized") {
+    const seen = new Map();
+    (st.categories || []).forEach(c => { if (c[key] !== undefined && !seen.has(String(c.value))) seen.set(String(c.value), c[key]); });
+    if (!seen.size) return dflt;
+    const args = [];
+    seen.forEach((val, label) => args.push(label, val));
+    return ["match", ["to-string", ["get", st.field]], ...args, dflt];
+  }
+  if (st.mode === "graduated") {
+    const cases = [];
+    (st.ranges || []).forEach(r => {
+      if (r[key] === undefined) return;
+      const x = ["to-number", ["get", st.field]];
+      cases.push(["all", ["has", st.field], [">=", x, r.min], ["<=", x, r.max]], r[key]);
+    });
+    return cases.length ? ["case", ...cases, dflt] : dflt;
+  }
+  return st[key] !== undefined ? st[key] : fallback;
+}
+
+function swatchColors(t) {
+  const st = t.style;
+  if (!st) return [t.color];
+  const key = t.geometry.includes("polygon") || t.geometry.includes("point") ? "fill" : "stroke";
+  if (st.mode === "categorized") {
+    const c = (st.categories || []).map(x => ({ color: x[key] || x.stroke, label: x.label }));
+    if (st.default) c.push({ color: st.default[key] || st.default.stroke, label: "その他" });
+    return c.length ? c : [t.color];
+  }
+  if (st.mode === "graduated") return (st.ranges || []).map(x => ({ color: x[key] || x.stroke, label: x.label }));
+  return [st[key] || st.stroke || t.color];
+}
+
 function addTileset(t, i) {
   const id = `ts-${i}`;
   const url = new URL(t.path, location.href).href;
   map.addSource(id, { type: "vector", url: `pmtiles://${url}` });
-  const color = t.color, sl = t.layer, vis = state.visible.has(t.path) ? "visible" : "none";
+  const color = t.color, sl = t.layer, st = t.style, vis = state.visible.has(t.path) ? "visible" : "none";
   const common = { source: id, "source-layer": sl, layout: { visibility: vis } };
   if (t.geometry.includes("polygon")) {
     map.addLayer({ ...common, id: `${id}-fill`, type: "fill",
-      paint: { "fill-color": color, "fill-opacity": 0.4 } });
+      paint: { "fill-color": valExpr(st, "fill", color), "fill-opacity": valExpr(st, "fillOpacity", 0.4) } });
     map.addLayer({ ...common, id: `${id}-line`, type: "line",
-      paint: { "line-color": color, "line-width": 1.5 } });
+      paint: { "line-color": valExpr(st, "stroke", color), "line-opacity": valExpr(st, "strokeOpacity", 1),
+               "line-width": valExpr(st, "strokeWidth", 1.5) } });
   } else if (t.geometry.includes("line")) {
     map.addLayer({ ...common, id: `${id}-line`, type: "line",
-      paint: { "line-color": color, "line-width": 2.5 } });
+      paint: { "line-color": valExpr(st, "stroke", color), "line-opacity": valExpr(st, "strokeOpacity", 1),
+               "line-width": valExpr(st, "strokeWidth", 2.5) } });
   } else {
     map.addLayer({ ...common, id: `${id}-circle`, type: "circle",
-      paint: { "circle-color": color, "circle-radius": 5,
-               "circle-stroke-color": "#fff", "circle-stroke-width": 1 } });
+      paint: { "circle-color": valExpr(st, "fill", color), "circle-opacity": valExpr(st, "fillOpacity", 1),
+               "circle-radius": valExpr(st, "radius", 5),
+               "circle-stroke-color": valExpr(st, "stroke", "#fff"), "circle-stroke-opacity": valExpr(st, "strokeOpacity", 1),
+               "circle-stroke-width": valExpr(st, "strokeWidth", 1) } });
   }
   t._layers = map.getStyle().layers.filter(l => l.id.startsWith(id + "-")).map(l => l.id);
 }
@@ -154,12 +198,21 @@ function renderList() {
     const cb = Object.assign(document.createElement("input"), { type: "checkbox", id: "cb-" + t.path });
     cb.checked = state.visible.has(t.path);
     cb.onchange = () => setVisible(t, cb.checked);
-    const sw = document.createElement("span"); sw.className = "swatch"; sw.style.background = t.color;
+    const cols = swatchColors(t).map(c => typeof c === "string" ? { color: c, label: "" } : c);
+    const sw = document.createElement("span"); sw.className = "swatch"; sw.style.background = cols[0].color || t.color;
     const lb = document.createElement("label"); lb.htmlFor = cb.id;
     const nm = document.createElement("span"); nm.className = "name"; nm.textContent = t.name; nm.title = t.path;
     const mt = document.createElement("span"); mt.className = "meta";
     mt.textContent = `${t.geometry} · ${t.features} 件 · z${t.minzoom}–${t.maxzoom} · ${fmtSize(t.size)}`;
     lb.append(nm, mt);
+    if (cols.length > 1) {
+      const chips = document.createElement("span"); chips.className = "chips";
+      cols.slice(0, 12).forEach(c => {
+        const ch = document.createElement("i"); ch.style.background = c.color; ch.title = c.label || "";
+        chips.appendChild(ch);
+      });
+      lb.appendChild(chips);
+    }
     const go = document.createElement("button"); go.textContent = "移動"; go.onclick = () => { cb.checked = true; setVisible(t, true); zoomTo(t); };
     row.append(cb, sw, lb, go);
     el.appendChild(row);

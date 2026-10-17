@@ -25,7 +25,15 @@
    ],
    "size": 7383,
    "survey": "kamihiraide",
-   "name": "nouchi"
+   "name": "nouchi",
+   "style": {
+    "mode": "single",
+    "fill": "#33a02c",
+    "fillOpacity": 0.501,
+    "stroke": "#232323",
+    "strokeOpacity": 0.501,
+    "strokeWidth": 0.98
+   }
   },
   {
    "path": "test/nouchi.pmtiles",
