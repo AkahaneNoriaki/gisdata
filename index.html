@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- pmtiles-publisher-viewer:2 -->
+<!-- pmtiles-publisher-viewer:3 -->
 <html lang="ja">
 <head>
 <meta charset="utf-8">
@@ -107,6 +107,17 @@ function setBasemap(key) {
   map.addLayer({ id: "basemap", type: "raster", source: "basemap" }, first);
 }
 
+// ルールの条件 [項目, 演算子, 値] を MapLibre の式にする
+function condExpr(c) {
+  const [f, op, v] = c, has = ["has", f];
+  if (op === "in") return ["all", has, ["in", ["to-string", ["get", f]], ["literal", v.map(String)]]];
+  if (typeof v === "number") {
+    const o = { "=": "==", "!=": "!=", "<": "<", "<=": "<=", ">": ">", ">=": ">=" }[op];
+    return ["all", has, [o, ["to-number", ["get", f]], v]];
+  }
+  return ["all", has, [op === "=" ? "==" : "!=", ["to-string", ["get", f]], v]];
+}
+
 // QGIS のシンボル (catalog.json の style) を MapLibre の式にする
 function valExpr(st, key, fallback) {
   if (!st) return fallback;
@@ -118,6 +129,15 @@ function valExpr(st, key, fallback) {
     const args = [];
     seen.forEach((val, label) => args.push(label, val));
     return ["match", ["to-string", ["get", st.field]], ...args, dflt];
+  }
+  if (st.mode === "rules") {
+    const cases = [];
+    (st.rules || []).forEach(r => {
+      if (r[key] === undefined) return;
+      const cs = (r.conds || []).map(condExpr);
+      cases.push(cs.length === 0 ? true : cs.length === 1 ? cs[0] : ["all", ...cs], r[key]);
+    });
+    return cases.length ? ["case", ...cases, dflt] : dflt;
   }
   if (st.mode === "graduated") {
     const cases = [];
@@ -141,6 +161,11 @@ function swatchColors(t) {
     return c.length ? c : [t.color];
   }
   if (st.mode === "graduated") return (st.ranges || []).map(x => ({ color: x[key] || x.stroke, label: x.label }));
+  if (st.mode === "rules") {
+    const c = (st.rules || []).map(x => ({ color: x[key] || x.stroke, label: x.label }));
+    if (st.default) c.push({ color: st.default[key] || st.default.stroke, label: "その他" });
+    return c.length ? c : [t.color];
+  }
   return [st[key] || st.stroke || t.color];
 }
 
