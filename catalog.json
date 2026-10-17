@@ -1,0 +1,31 @@
+{
+ "version": 1,
+ "tilesets": [
+  {
+   "path": "test/nouchi.pmtiles",
+   "layer": "nouchi",
+   "geometry": "polygon",
+   "bounds": [
+    138.0078725,
+    35.993602,
+    138.0090237,
+    35.9945783
+   ],
+   "minzoom": 0,
+   "maxzoom": 14,
+   "features": 7,
+   "fields": [
+    "polygon_uuid",
+    "land_type",
+    "issue_year",
+    "edit_year",
+    "last_polygon_uuid",
+    "prev_last_polygon_uuid",
+    "local_government_cd"
+   ],
+   "size": 7383,
+   "survey": "test",
+   "name": "nouchi"
+  }
+ ]
+}
